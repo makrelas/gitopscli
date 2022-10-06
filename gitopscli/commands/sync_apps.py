@@ -28,6 +28,43 @@ class SyncAppsCommand(Command):
 
     def execute(self) -> None:
         _sync_apps_command(self.__args)
+@dataclass
+class AppConfig:
+    name: str #appname
+    config_type: str #is instance initialized as config located in root/team repo
+    parent_tennant: str #which tenant app belongs to
+    parent_repository: str #parent tenant team repo url
+    user_config: dict #custom project configuration from tenant repo custom_tenant_config.yaml from team repo (only part containing the application instance, yaml location applications.{}.user_config
+    status: bool #indicator if appconfig is currently synced (not entirely sure if this porperty brings value)
+    admin_config: dict #application configuration obtained from root repository applications.{}, excluding user_config, empty when AppConfig object instance is initialized as team_repo app config
+@dataclass
+class AppTenantConfig: 
+    name: str #tenant name
+    app_list: set(AppConfig) #list of AppConfig objects owned by the tenant
+    repository: str #team tenant repository url
+    user_config: dict #contents of custom_tenant_config.yaml in team repository
+    def list_apps(self):
+        #lists apps contained in the config
+        return
+    def add_app(self):
+        #adds app to the app tenant config
+        return
+    def modify_app(self):
+        #modifies existing app in tenant config
+        return
+    def delete_app(self):
+        #deletes app from tenant config
+        return
+@dataclass
+class RootRepoTenant:
+    name: str #tenant name
+    tenant_config: dict #whole configuration of tenant
+    app_list: AppTenantConfig #apps owned by tenant
+@dataclass
+class RootRepo:
+    name: str #root repository name
+    tenant_list: set(RootRepoTenant) #list of the tenant configs in the root repository (in apps folder)
+    bootstrap: set #list of tenants to be bootstrapped, derived form values.yaml in bootstrap root repo dict   
 
 
 def _sync_apps_command(args: SyncAppsCommand.Args) -> None:
