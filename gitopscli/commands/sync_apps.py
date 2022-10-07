@@ -2,6 +2,8 @@ import logging
 import os
 from dataclasses import dataclass
 from typing import Any, Set, Tuple, List, Dict
+
+from jinja2 import TemplateAssertionError
 from gitopscli.git_api import GitApiConfig, GitRepo, GitRepoApiFactory
 from gitopscli.io_api.yaml_util import merge_yaml_element, yaml_file_load
 from gitopscli.gitops_exception import GitOpsException
@@ -60,11 +62,74 @@ class RootRepoTenant:
     name: str #tenant name
     tenant_config: dict #whole configuration of tenant
     app_list: AppTenantConfig #apps owned by tenant
+
 @dataclass
 class RootRepo:
     name: str #root repository name
     tenant_list: set(RootRepoTenant) #list of the tenant configs in the root repository (in apps folder)
     bootstrap: set #list of tenants to be bootstrapped, derived form values.yaml in bootstrap root repo dict   
+    
+    def __init__(self, root_config_git_repo: GitRepo):
+        repo_clone_url = root_config_git_repo.get_clone_url()
+        root_config_git_repo.clone()
+        bootstrap_values_file = root_config_git_repo.get_full_file_path("bootstrap/values.yaml")
+        self.bootstrap = self.__get_bootstrap_entries(bootstrap_values_file)
+        self.name = repo_clone_url.split("/")[-1].removesuffix(".git")
+        self.tenant_list = self.__generate_tenant_app_list
+
+    def __get_bootstrap_entries(self, bootstrap_values_file: str) -> Any:
+        try:
+            bootstrap_yaml = yaml_file_load(bootstrap_values_file)
+        except FileNotFoundError as ex:
+            raise GitOpsException("File 'bootstrap/values.yaml' not found in root repository.") from ex
+        if "bootstrap" not in bootstrap_yaml:
+            raise GitOpsException("Cannot find key 'bootstrap' in 'bootstrap/values.yaml'")
+        for bootstrap_entry in bootstrap_yaml["bootstrap"]:
+            if "name" not in bootstrap_entry:
+                raise GitOpsException("Every bootstrap entry must have a 'name' property.")
+        return bootstrap_yaml["bootstrap"]
+        
+    def __generate_tenant_app_list(self, root_config_git_repo: GitRepo):
+        #TODO rename tenant_app_config_* variables to differ apps config from single app config
+        for bootstrap_entry in self.bootstrap:
+            tenant_app_config_file_name = "apps/" + bootstrap_entry["name"] + ".yaml"
+            logging.info("Analyzing %s in root repository", tenant_app_config_file_name)
+            tenant_app_config_file = root_config_git_repo.get_full_file_path(tenant_app_config_file_name)
+            try:
+                tenant_app_config_content = yaml_file_load(tenant_app_config_file)
+            except FileNotFoundError as ex:
+                raise GitOpsException(f"File '{tenant_app_config_file_name}' not found in root repository.") from ex
+            #TODO exception handling for malformed yaml
+            if "repository" not in tenant_app_config_content:
+                raise GitOpsException(f"Cannot find key 'repository' in '{tenant_app_config_file_name}'")
+            if "config" in tenant_app_config_content:
+                #TODO: change this var as well, confusing naming
+                tenant_apps_config_content = tenant_app_config_content["config"]
+                tenant_apps_config_object = AppTenantConfig(name=bootstrap_entry["name"],user_config=tenant_apps_config_content)
+                for tenant_app_config in tenant_app_config_content["applications"]:
+                    single_app_config = AppConfig(
+                        name=tenant_app_config.key(),
+                        config_type="root",
+                        parent_tennant=tenant_apps_config_object.name,
+                        parent_repository=tenant_apps_config_object.repository,
+                        admin_config=tenant_app_config.value())
+                    tenant_apps_config_object.add_app(single_app_config)
+
+
+                #found_apps_path = "config.applications"
+            #TODO: what that if/else is actually checking - and why
+            #if tenant_app_config_content["repository"] == team_config_git_repo_clone_url:
+                #logging.info("Found apps repository in %s", tenant_app_config_file_name)
+                #found_app_config_file = app_config_file
+                #found_app_config_file_name = app_file_name
+                #found_app_config_apps = __get_applications_from_app_config(app_config_content)
+            #else:
+                #apps_from_other_repos.update(__get_applications_from_app_config(app_config_content))
+
+        #if found_app_config_file is None or found_app_config_file_name is None:
+            #raise GitOpsException(f"Couldn't find config file for apps repository in root repository's 'apps/' directory")
+
+
 
 
 def _sync_apps_command(args: SyncAppsCommand.Args) -> None:
@@ -139,8 +204,10 @@ def __find_apps_config_from_repo(
     bootstrap_entries = __get_bootstrap_entries(root_config_git_repo)
     team_config_git_repo_clone_url = team_config_git_repo.get_clone_url()
     for bootstrap_entry in bootstrap_entries:
+        #moved to the root_repo bootstrap, not removing until whole function could be replaced 
         if "name" not in bootstrap_entry:
             raise GitOpsException("Every bootstrap entry must have a 'name' property.")
+        
         app_file_name = "apps/" + bootstrap_entry["name"] + ".yaml"
         logging.info("Analyzing %s in root repository", app_file_name)
         app_config_file = root_config_git_repo.get_full_file_path(app_file_name)
@@ -163,7 +230,7 @@ def __find_apps_config_from_repo(
 
     if found_app_config_file is None or found_app_config_file_name is None:
         raise GitOpsException(f"Couldn't find config file for apps repository in root repository's 'apps/' directory")
-
+       ##### 
     return (
         found_app_config_file,
         found_app_config_file_name,
