@@ -2,6 +2,8 @@ import logging
 import os
 from dataclasses import dataclass
 from typing import Any, Set, Tuple, List, Dict
+
+from jinja2 import TemplateAssertionError
 from gitopscli.git_api import GitApiConfig, GitRepo, GitRepoApiFactory
 from gitopscli.io_api.yaml_util import merge_yaml_element, yaml_file_load
 from gitopscli.gitops_exception import GitOpsException
