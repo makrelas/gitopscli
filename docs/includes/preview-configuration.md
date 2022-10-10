@@ -23,12 +23,17 @@ Make sure that your *app repository* contains a `.gitops.config.yaml` file. This
 
 1. find repository, branch, and folder containing the template
 2. templates for host and namespace name
-3. replace values in template files
+3. replace values in template files (see [`deploy` command](/gitopscli/commands/deploy/) for details on the key syntax)
 4. find repository and branch where the preview should be created (i.e. your *deployment config repository*)
+5. message templates used to comment your pull request
 
 ```yaml
 apiVersion: v2
 applicationName: app-xy
+# messages:                              # optional section
+#   previewEnvCreated: "Created preview at revision ${GIT_HASH}. You can access it here: https://${PREVIEW_HOST}/some-fancy-path"    # optional (default: "New preview environment created for version `${GIT_HASH}`. Access it here: https://${PREVIEW_HOST}")
+#   previewEnvUpdated: "Updated preview to revision ${GIT_HASH}. You can access it here: https://${PREVIEW_HOST}/some-fancy-path"    # optional (default: "Preview environment updated to version `${GIT_HASH}`. Access it here: https://${PREVIEW_HOST}")
+#   previewEnvAlreadyUpToDate: "Your preview is already up-to-date with revision ${GIT-HASH}."                                       # optional (default: "The version `${GIT_HASH}` has already been deployed. Access it here: https://${PREVIEW_HOST}")
 previewConfig:
   host: ${PREVIEW_NAMESPACE}.example.tld
 # template:                              # optional section
