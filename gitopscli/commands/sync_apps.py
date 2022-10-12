@@ -3,7 +3,7 @@ import os
 from dataclasses import dataclass
 from typing import Any, Set, Tuple, List, Dict
 from gitopscli.git_api import GitApiConfig, GitRepo, GitRepoApiFactory
-from gitopscli.io_api.yaml_util import merge_yaml_element, yaml_file_load, yaml_load
+from gitopscli.io_api.yaml_util import merge_yaml_element, yaml_file_load, yaml_load, yaml_dump
 from gitopscli.gitops_exception import GitOpsException
 from .command import Command
 from ruamel.yaml import YAML 
@@ -31,6 +31,7 @@ class SyncAppsCommand(Command):
         _sync_apps_command(self.__args)
 @dataclass
 class AppTenantConfig: 
+    #TODO: rethink objects and class initialization methods
     config_type: str #is instance initialized as config located in root/team repo
     data: YAML
     #schema important fields
@@ -40,7 +41,7 @@ class AppTenantConfig:
     # config.applications.{}.userconfig - user configuration 
     name: str #tenant name
     config_source_repository: str #team tenant repository url
-    user_config: dict #contents of custom_tenant_config.yaml in team repository
+    #user_config: dict #contents of custom_tenant_config.yaml in team repository
     file_path: str
     file_name: str
     def __init__(self, config_type, config_source_repository=None, data=None, name=None, file_path=None, file_name=None):
@@ -49,7 +50,7 @@ class AppTenantConfig:
             self.data = data
             self.config_source_repository = config_source_repository
             self.name = name
-            self.user_config = None
+            #self.user_config = None
             self.file_path = file_path
             self.file_name = file_name
         elif self.config_type == "team":
@@ -58,7 +59,7 @@ class AppTenantConfig:
             self.data = self.generate_config_from_team_repo()
             self.name = name
             #self.user_config = self.get_custom_config()
-            self.user_config = None
+            #self.user_config = None
 
     def generate_config_from_team_repo(self):   
         #recognize type of repo
@@ -80,21 +81,29 @@ class AppTenantConfig:
             template_yaml = '''
             {}: {{}}
             '''.format(app)
+            customconfig = self.get_custom_config(app)
             app_as_yaml_object = yaml_load(template_yaml)
+
             data["config"]["applications"].update(app_as_yaml_object)
-        self.get_custom_config()
+            data["config"]["applications"][app].insert(1, "CustomAppConfig", customconfig)
+        
         return data
 
-
-    def get_custom_config(self):
+#TODO: method should contain all aps, not only one, requires rewriting of merging during root repo init
+    def get_custom_config(self, appname):
         team_config_git_repo = self.config_source_repository
         try:
             custom_config_file = team_config_git_repo.get_full_file_path("app_value_file.yaml")
         except: 
             #handle missing file
-            #handle broken file
+            #handle broken file/nod adhering to allowed
             pass
-        return yaml_file_load(custom_config_file)
+        #sanitize
+        #TODO: how to keep whole content with comments
+        #TODO: handling generic values for all apps
+        custom_config_content = yaml_file_load(custom_config_file)
+        return custom_config_content["applications"].get(appname, dict())
+
     def list_apps(self):
         return self.data["config"]["applications"]
     def add_app(self):
@@ -178,6 +187,7 @@ def __sync_apps(team_config_git_repo: GitRepo, root_config_git_repo: GitRepo, gi
     team_config_app_name = team_config_git_repo.get_clone_url().split("/")[-1].removesuffix(".git")
     rr=RootRepo(root_config_git_repo)
     tenant_config_team_repo=AppTenantConfig("team",config_source_repository=team_config_git_repo)
+    #dict conversion causes YAML object to be unordered
     tenant_config_repo_apps = dict(tenant_config_team_repo.list_apps())
     current_repo_apps = dict(rr.tenant_list[team_config_app_name].list_apps())
     apps_from_other_repos = rr.app_list
@@ -194,6 +204,12 @@ def __sync_apps(team_config_git_repo: GitRepo, root_config_git_repo: GitRepo, gi
     #TODO FIX VALUE TO DIFFER BETWEEN OLD/NEW STYLE
     found_apps_path = "config.applications"
 
+    #removing all keys not being current app repo in order to compare app lists excluding keys added by root repo administrator, to be figured out how to handle that better
+    for app in list(current_repo_apps.keys()):
+        for key in list(current_repo_apps[app].keys()):
+            if key != "CustomAppConfig":
+                del current_repo_apps[app][key]
+    #TODO: validate if all changes do key values trigger difference
     if current_repo_apps == tenant_config_repo_apps:
         logging.info("Root repository already up-to-date. I'm done here.")
         return
@@ -202,31 +218,11 @@ def __sync_apps(team_config_git_repo: GitRepo, root_config_git_repo: GitRepo, gi
     merge_yaml_element(
         apps_config_file,
         found_apps_path,
-        {repo_app: {} for repo_app in tenant_config_repo_apps},
+        {repo_app: tenant_config_team_repo.data["config"]["applications"].get(repo_app, "{}") for repo_app in tenant_config_repo_apps},
     )
+
     __commit_and_push(team_config_git_repo, root_config_git_repo, git_user, git_email, apps_config_file_name)
 
-
-# def __clean_yaml(values: Dict[str, Any]) -> Any:
-#     yml_result = values.copy()
-#     for key in values.keys():
-#         if key in YAML_BLACKLIST:
-#             logging.info("value %s removed", key)
-#             del yml_result[key]
-#         else:
-#             if isinstance(values[key], dict):
-#                 yml_result[key] = __clean_yaml(values[key].copy())
-#     return yml_result
-
-
-# def __clean_repo_app(team_config_git_repo: GitRepo, app_name: str) -> Any:
-#     app_spec_file = team_config_git_repo.get_full_file_path(f"{app_name}/values.yaml")
-#     try:
-#         app_config_content = yaml_file_load(app_spec_file)
-#         return __clean_yaml(app_config_content)
-#     except FileNotFoundError as ex:
-#         logging.exception("no specific app settings file found for %s", app_name, exc_info=ex)
-#         return {}
 
 def __commit_and_push(
     team_config_git_repo: GitRepo, root_config_git_repo: GitRepo, git_user: str, git_email: str, app_file_name: str
