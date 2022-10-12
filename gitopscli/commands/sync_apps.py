@@ -69,13 +69,20 @@ class AppTenantConfig:
             for name in os.listdir(repo_dir)
             if os.path.isdir(os.path.join(repo_dir, name)) and not name.startswith(".")
         }
+        #TODO: Create YAML() object without writing template strings, currently this is the easiest method, although it can be better 
         template_yaml = '''
         config: 
           repository: {}
-          applications: []
+          applications: {{}}
         '''.format(team_config_git_repo.get_clone_url())
         data = yaml_load(template_yaml)
-        data["config"]["applications"] = applist
+        for app in applist:
+            template_yaml = '''
+            {}: {{}}
+            '''.format(app)
+            app_as_yaml_object = yaml_load(template_yaml)
+            data["config"]["applications"].update(app_as_yaml_object)
+        self.get_custom_config()
         return data
 
 
@@ -168,119 +175,58 @@ def _sync_apps_command(args: SyncAppsCommand.Args) -> None:
 def __sync_apps(team_config_git_repo: GitRepo, root_config_git_repo: GitRepo, git_user: str, git_email: str) -> None:
     logging.info("Team config repository: %s", team_config_git_repo.get_clone_url())
     logging.info("Root config repository: %s", root_config_git_repo.get_clone_url())
+    team_config_app_name = team_config_git_repo.get_clone_url().split("/")[-1].removesuffix(".git")
     rr=RootRepo(root_config_git_repo)
     tenant_config_team_repo=AppTenantConfig("team",config_source_repository=team_config_git_repo)
-    tenant_config_repo_apps = tenant_config_team_repo.list_apps()
-    current_repo_apps = rr.tenant_list
+    tenant_config_repo_apps = dict(tenant_config_team_repo.list_apps())
+    current_repo_apps = dict(rr.tenant_list[team_config_app_name].list_apps())
     apps_from_other_repos = rr.app_list
-    team_config_app_name = team_config_git_repo.get_clone_url().split("/")[-1].removesuffix(".git")
-    #team_config_file_name = rr.tenant_list
+    
     if len(apps_from_other_repos) != len(set(apps_from_other_repos)):
         logging.info("duplicate value found, veryfying")
         #TODO find which value is duplicate
         #raise GitOpsException(f"Application '{app_key}' already exists in a different repository")
     logging.info("Found %s app(s) in apps repository: %s", len(tenant_config_repo_apps), ", ".join(tenant_config_repo_apps))
-
     logging.info("Searching apps repository in root repository's 'apps/' directory...")
-    #(
-    #    apps_config_file,
-    #    apps_config_file_name,
-    #    found_apps_path,
-    #) = __find_apps_config_from_repo(team_config_git_repo, root_config_git_repo)
 
     apps_config_file = rr.tenant_list[team_config_app_name].file_path
     apps_config_file_name = rr.tenant_list[team_config_app_name].file_name
-    #TODO FIX VALUE
+    #TODO FIX VALUE TO DIFFER BETWEEN OLD/NEW STYLE
     found_apps_path = "config.applications"
 
     if current_repo_apps == tenant_config_repo_apps:
         logging.info("Root repository already up-to-date. I'm done here.")
         return
 
-    #__check_if_app_already_exists(tenant_config_repo_apps, apps_from_other_repos)
-
     logging.info("Sync applications in root repository's %s.", apps_config_file_name)
     merge_yaml_element(
         apps_config_file,
         found_apps_path,
-        {repo_app: __clean_repo_app(team_config_git_repo, repo_app) for repo_app in tenant_config_repo_apps},
+        {repo_app: {} for repo_app in tenant_config_repo_apps},
     )
     __commit_and_push(team_config_git_repo, root_config_git_repo, git_user, git_email, apps_config_file_name)
 
 
-def __clean_yaml(values: Dict[str, Any]) -> Any:
-    yml_result = values.copy()
-    for key in values.keys():
-        if key in YAML_BLACKLIST:
-            logging.info("value %s removed", key)
-            del yml_result[key]
-        else:
-            if isinstance(values[key], dict):
-                yml_result[key] = __clean_yaml(values[key].copy())
-    return yml_result
+# def __clean_yaml(values: Dict[str, Any]) -> Any:
+#     yml_result = values.copy()
+#     for key in values.keys():
+#         if key in YAML_BLACKLIST:
+#             logging.info("value %s removed", key)
+#             del yml_result[key]
+#         else:
+#             if isinstance(values[key], dict):
+#                 yml_result[key] = __clean_yaml(values[key].copy())
+#     return yml_result
 
 
-def __clean_repo_app(team_config_git_repo: GitRepo, app_name: str) -> Any:
-    app_spec_file = team_config_git_repo.get_full_file_path(f"{app_name}/values.yaml")
-    try:
-        app_config_content = yaml_file_load(app_spec_file)
-        return __clean_yaml(app_config_content)
-    except FileNotFoundError as ex:
-        logging.exception("no specific app settings file found for %s", app_name, exc_info=ex)
-        return {}
-
-
-#def __find_apps_config_from_repo(
-#    team_config_git_repo: GitRepo, root_config_git_repo: GitRepo
-#) -> Tuple[str, str, Set[str], Set[str], str]:
-#    apps_from_other_repos: Set[str] = set()  # Set for all entries in .applications from each config repository
-#    found_app_config_file = None
-#    found_app_config_file_name = None
-#    found_apps_path = "applications"
-#    found_app_config_apps: Set[str] = set()
-#    bootstrap_entries = __get_bootstrap_entries(root_config_git_repo)
-#    team_config_git_repo_clone_url = team_config_git_repo.get_clone_url()
-#    for bootstrap_entry in bootstrap_entries:
-#        #moved to the root_repo bootstrap, not removing until whole function could be replaced 
-##       if "name" not in bootstrap_entry:
-#            raise GitOpsException("Every bootstrap entry must have a 'name' property.")
-#        
-#        app_file_name = "apps/" + bootstrap_entry["name"] + ".yaml"
-#        logging.info("Analyzing %s in root repository", app_file_name)
-#        app_config_file = root_config_git_repo.get_full_file_path(app_file_name)
-#        try:
-#            app_config_content = yaml_file_load(app_config_file)
-#        except FileNotFoundError as ex:
-#            raise GitOpsException(f"File '{app_file_name}' not found in root repository.") from ex
-#        if "config" in app_config_content:
-#            app_config_content = app_config_content["config"]
-#            found_apps_path = "config.applications"
-#        if "repository" not in app_config_content:
-#            raise GitOpsException(f"Cannot find key 'repository' in '{app_file_name}'")
-#        if app_config_content["repository"] == team_config_git_repo_clone_url:
-#            logging.info("Found apps repository in %s", app_file_name)
-#            found_app_config_file = app_config_file
-#            found_app_config_file_name = app_file_name
-#            found_app_config_apps = __get_applications_from_app_config(app_config_content)
-#        else:
-#            apps_from_other_repos.update(__get_applications_from_app_config(app_config_content))
-
-#    if found_app_config_file is None or found_app_config_file_name is None:
-#        raise GitOpsException(f"Couldn't find config file for apps repository in root repository's 'apps/' directory")
-#       ##### 
-#    return (
-#        found_app_config_file,
-#        found_app_config_file_name,
-#        found_apps_path,
-#    )
-
-
-#def __get_applications_from_app_config(app_config: Any) -> Set[str]:
-#    apps = []
-#    if "applications" in app_config and app_config["applications"] is not None:
-#        apps += app_config["applications"].keys()
-#    return set(apps)
-
+# def __clean_repo_app(team_config_git_repo: GitRepo, app_name: str) -> Any:
+#     app_spec_file = team_config_git_repo.get_full_file_path(f"{app_name}/values.yaml")
+#     try:
+#         app_config_content = yaml_file_load(app_spec_file)
+#         return __clean_yaml(app_config_content)
+#     except FileNotFoundError as ex:
+#         logging.exception("no specific app settings file found for %s", app_name, exc_info=ex)
+#         return {}
 
 def __commit_and_push(
     team_config_git_repo: GitRepo, root_config_git_repo: GitRepo, git_user: str, git_email: str, app_file_name: str
@@ -288,31 +234,3 @@ def __commit_and_push(
     author = team_config_git_repo.get_author_from_last_commit()
     root_config_git_repo.commit(git_user, git_email, f"{author} updated " + app_file_name)
     root_config_git_repo.push()
-
-
-# def __get_bootstrap_entries(root_config_git_repo: GitRepo) -> Any:
-#     root_config_git_repo.clone()
-#     bootstrap_values_file = root_config_git_repo.get_full_file_path("bootstrap/values.yaml")
-#     try:
-#         bootstrap_yaml = yaml_file_load(bootstrap_values_file)
-#     except FileNotFoundError as ex:
-#         raise GitOpsException("File 'bootstrap/values.yaml' not found in root repository.") from ex
-#     if "bootstrap" not in bootstrap_yaml:
-#         raise GitOpsException("Cannot find key 'bootstrap' in 'bootstrap/values.yaml'")
-#     return bootstrap_yaml["bootstrap"]
-
-
-# def __get_repo_apps(team_config_git_repo: GitRepo) -> Set[str]:
-#     team_config_git_repo.clone()
-#     repo_dir = team_config_git_repo.get_full_file_path(".")
-#     return {
-#         name
-#         for name in os.listdir(repo_dir)
-#         if os.path.isdir(os.path.join(repo_dir, name)) and not name.startswith(".")
-#     }
-
-
-#def __check_if_app_already_exists(apps_dirs: Set[str], apps_from_other_repos: Set[str]) -> None:
-#    for app_key in apps_dirs:
-#        if app_key in apps_from_other_repos:
-#            raise GitOpsException(f"Application '{app_key}' already exists in a different repository")
