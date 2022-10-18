@@ -44,23 +44,28 @@ class AppTenantConfig:
     #user_config: dict #contents of custom_tenant_config.yaml in team repository
     file_path: str
     file_name: str
+    config_api_version: tuple
     def __init__(self, config_type, config_source_repository=None, data=None, name=None, file_path=None, file_name=None):
         self.config_type = config_type
+        self.config_source_repository = config_source_repository
         if self.config_type == "root":
             self.data = data
-            self.config_source_repository = config_source_repository
-            self.name = name
-            #self.user_config = None
             self.file_path = file_path
             self.file_name = file_name
-        elif self.config_type == "team":
-            self.config_source_repository = config_source_repository
+        elif self.config_type == "team":            
             self.config_source_repository.clone()
             self.data = self.generate_config_from_team_repo()
-            self.name = name
-            #self.user_config = self.get_custom_config()
-            #self.user_config = None
+        self.config_api_version = self.__get_config_api_version()
+        self.name = name
+        
+    def __get_config_api_version(self):
+        #maybe count the keys?
+        if "config" in self.data.keys():
+            return ("v2", ("config", "applications"))
+        else:
+            return ("v1", ("applications",))
 
+    
     def generate_config_from_team_repo(self):   
         #recognize type of repo
         team_config_git_repo = self.config_source_repository
@@ -83,29 +88,32 @@ class AppTenantConfig:
             '''.format(app)
             customconfig = self.get_custom_config(app)
             app_as_yaml_object = yaml_load(template_yaml)
-
+            #dict path hardcoded as object generated will always be in v2 or later
             data["config"]["applications"].update(app_as_yaml_object)
-            data["config"]["applications"][app].insert(1, "CustomAppConfig", customconfig)
+            data["config"]["applications"][app].insert(1, "customAppConfig", customconfig)
         
         return data
-
+#TODO: rewrite! as config should be inside of the app folder
 #TODO: method should contain all aps, not only one, requires rewriting of merging during root repo init
     def get_custom_config(self, appname):
         team_config_git_repo = self.config_source_repository
         try:
             custom_config_file = team_config_git_repo.get_full_file_path("app_value_file.yaml")
-        except: 
+        except Exception as ex: 
             #handle missing file
             #handle broken file/nod adhering to allowed
-            pass
+            return ex
         #sanitize
         #TODO: how to keep whole content with comments
         #TODO: handling generic values for all apps
-        custom_config_content = yaml_file_load(custom_config_file)
-        return custom_config_content["applications"].get(appname, dict())
+        #if os.path.exists(custom_config_content):
+        #    custom_config_content = yaml_file_load(custom_config_file)
+        #    return custom_config_content["applications"].get(appname, dict())
+        #else:
+        #return {}
 
     def list_apps(self):
-        return self.data["config"]["applications"]
+        return traverse_config(self.data, self.config_api_version)
     def add_app(self):
         #adds app to the app tenant config
         pass
@@ -168,10 +176,20 @@ class RootRepo:
     def __get_all_apps_list(self):
         all_apps_list = []
         for tenant in self.tenant_list:
-            all_apps_list.extend(list(dict(self.tenant_list[tenant].data["config"]["applications"]).keys()))
+            value = traverse_config(self.tenant_list[tenant].data, self.tenant_list[tenant].config_api_version)
+            #path = self.tenant_list[tenant].config_api_version[1]
+            #lookup = self.tenant_list[tenant].data
+            #for key in path:
+            #    lookup = lookup[key]
+            all_apps_list.extend(list(dict(value).keys()))
         return all_apps_list
 
-
+def traverse_config(object, configver):
+        path = configver[1]
+        lookup = object
+        for key in path:
+            lookup = lookup[key]
+        return lookup
 
 def _sync_apps_command(args: SyncAppsCommand.Args) -> None:
     team_config_git_repo_api = GitRepoApiFactory.create(args, args.organisation, args.repository_name)
@@ -206,9 +224,10 @@ def __sync_apps(team_config_git_repo: GitRepo, root_config_git_repo: GitRepo, gi
 
     #removing all keys not being current app repo in order to compare app lists excluding keys added by root repo administrator, to be figured out how to handle that better
     for app in list(current_repo_apps.keys()):
-        for key in list(current_repo_apps[app].keys()):
-            if key != "CustomAppConfig":
-                del current_repo_apps[app][key]
+        if current_repo_apps.get(app, dict()) is not None:
+            for key in list(current_repo_apps.get(app, dict())):
+                if key != "CustomAppConfig":
+                    del current_repo_apps[app][key]
     #TODO: validate if all changes do key values trigger difference
     if current_repo_apps == tenant_config_repo_apps:
         logging.info("Root repository already up-to-date. I'm done here.")
@@ -218,7 +237,7 @@ def __sync_apps(team_config_git_repo: GitRepo, root_config_git_repo: GitRepo, gi
     merge_yaml_element(
         apps_config_file,
         found_apps_path,
-        {repo_app: tenant_config_team_repo.data["config"]["applications"].get(repo_app, "{}") for repo_app in tenant_config_repo_apps},
+        {repo_app: traverse_config(tenant_config_team_repo.data, tenant_config_team_repo.config_api_version).get(repo_app, "{}") for repo_app in tenant_config_repo_apps},
     )
 
     __commit_and_push(team_config_git_repo, root_config_git_repo, git_user, git_email, apps_config_file_name)
