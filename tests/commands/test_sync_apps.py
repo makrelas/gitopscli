@@ -1,4 +1,4 @@
-import imp
+import posixpath
 import logging
 import os
 import unittest
@@ -31,8 +31,9 @@ class SyncAppsCommandTest(MockMixin, unittest.TestCase):
 
         self.os_mock = self.monkey_patch(os)
         self.os_mock.path.isdir.return_value = True
-        self.os_mock.path.join.side_effect = os.path.join
+        self.os_mock.path.join.side_effect = posixpath.join #tests are designed to emulate posix env
         self.os_mock.listdir.return_value = ["my-app"]
+        self.os_mock.path.exists.return_value = False
 
         self.logging_mock = self.monkey_patch(logging)
         self.logging_mock.info.return_value = None
@@ -99,24 +100,29 @@ class SyncAppsCommandTest(MockMixin, unittest.TestCase):
             call.logging.info("Team config repository: %s", "https://repository.url/team/team-non-prod.git"),
             call.GitRepo_root.get_clone_url(),
             call.logging.info("Root config repository: %s", "https://repository.url/root/root-config.git"),
+            call.GitRepo_team.get_clone_url(),
+            call.GitRepo_root.get_clone_url(),
+            call.GitRepo_root.clone(),
+            call.GitRepo_root.get_full_file_path('bootstrap/values.yaml'),
+            call.yaml_file_load('/tmp/root-config-repo/bootstrap/values.yaml'),
+            call.logging.info('Analyzing %s in root repository', 'apps/team-non-prod.yaml'),
+            call.GitRepo_root.get_full_file_path('apps/team-non-prod.yaml'),
+            call.yaml_file_load('/tmp/root-config-repo/apps/team-non-prod.yaml'),
+            call.logging.info('adding team-non-prod'),
+            call.logging.info('Analyzing %s in root repository', 'apps/other-team-non-prod.yaml'),
+            call.GitRepo_root.get_full_file_path('apps/other-team-non-prod.yaml'),
+            call.yaml_file_load('/tmp/root-config-repo/apps/other-team-non-prod.yaml'),
+            call.logging.info('adding other-team-non-prod'),
             call.GitRepo_team.clone(),
             call.GitRepo_team.get_full_file_path("."),
             call.os.listdir("/tmp/team-config-repo/."),
             call.os.path.join("/tmp/team-config-repo/.", "my-app"),
             call.os.path.isdir("/tmp/team-config-repo/./my-app"),
+            call.GitRepo_team.get_clone_url(),
+            call.GitRepo_team.get_full_file_path('my-app/app_value_file.yaml'),
+            call.os.path.exists('/tmp/team-config-repo/my-app/app_value_file.yaml'),
             call.logging.info("Found %s app(s) in apps repository: %s", 1, "my-app"),
             call.logging.info("Searching apps repository in root repository's 'apps/' directory..."),
-            call.GitRepo_root.clone(),
-            call.GitRepo_root.get_full_file_path("bootstrap/values.yaml"),
-            call.yaml_file_load("/tmp/root-config-repo/bootstrap/values.yaml"),
-            call.GitRepo_team.get_clone_url(),
-            call.logging.info("Analyzing %s in root repository", "apps/team-non-prod.yaml"),
-            call.GitRepo_root.get_full_file_path("apps/team-non-prod.yaml"),
-            call.yaml_file_load("/tmp/root-config-repo/apps/team-non-prod.yaml"),
-            call.logging.info("Found apps repository in %s", "apps/team-non-prod.yaml"),
-            call.logging.info("Analyzing %s in root repository", "apps/other-team-non-prod.yaml"),
-            call.GitRepo_root.get_full_file_path("apps/other-team-non-prod.yaml"),
-            call.yaml_file_load("/tmp/root-config-repo/apps/other-team-non-prod.yaml"),
             call.logging.info("Sync applications in root repository's %s.", "apps/team-non-prod.yaml"),
             call.merge_yaml_element(
                 "/tmp/root-config-repo/apps/team-non-prod.yaml", "config.applications", {'my-app': ordereddict([('customAppConfig', None)])}
@@ -133,7 +139,7 @@ class SyncAppsCommandTest(MockMixin, unittest.TestCase):
             },
             "/tmp/root-config-repo/apps/team-non-prod.yaml": {
                 "repository": "https://repository.url/team/team-non-prod.git",
-                "applications": {"my-app": None},  # my-app already exists
+                "applications": {"my-app": ordereddict([('customAppConfig', None)])},  # my-app already exists
             },
             "/tmp/root-config-repo/apps/other-team-non-prod.yaml": {
                 "repository": "https://repository.url/other-team/other-team-non-prod.git",
@@ -151,24 +157,29 @@ class SyncAppsCommandTest(MockMixin, unittest.TestCase):
             call.logging.info("Team config repository: %s", "https://repository.url/team/team-non-prod.git"),
             call.GitRepo_root.get_clone_url(),
             call.logging.info("Root config repository: %s", "https://repository.url/root/root-config.git"),
+            call.GitRepo_team.get_clone_url(),
+            call.GitRepo_root.get_clone_url(),
+            call.GitRepo_root.clone(),
+            call.GitRepo_root.get_full_file_path('bootstrap/values.yaml'),
+            call.yaml_file_load('/tmp/root-config-repo/bootstrap/values.yaml'),
+            call.logging.info('Analyzing %s in root repository', 'apps/team-non-prod.yaml'),
+            call.GitRepo_root.get_full_file_path('apps/team-non-prod.yaml'),
+            call.yaml_file_load('/tmp/root-config-repo/apps/team-non-prod.yaml'),
+            call.logging.info('adding team-non-prod'),
+            call.logging.info('Analyzing %s in root repository', 'apps/other-team-non-prod.yaml'),
+            call.GitRepo_root.get_full_file_path('apps/other-team-non-prod.yaml'),
+            call.yaml_file_load('/tmp/root-config-repo/apps/other-team-non-prod.yaml'),
+            call.logging.info('adding other-team-non-prod'),
             call.GitRepo_team.clone(),
             call.GitRepo_team.get_full_file_path("."),
             call.os.listdir("/tmp/team-config-repo/."),
             call.os.path.join("/tmp/team-config-repo/.", "my-app"),
             call.os.path.isdir("/tmp/team-config-repo/./my-app"),
+            call.GitRepo_team.get_clone_url(),
+            call.GitRepo_team.get_full_file_path('my-app/app_value_file.yaml'),
+            call.os.path.exists('/tmp/team-config-repo/my-app/app_value_file.yaml'),
             call.logging.info("Found %s app(s) in apps repository: %s", 1, "my-app"),
             call.logging.info("Searching apps repository in root repository's 'apps/' directory..."),
-            call.GitRepo_root.clone(),
-            call.GitRepo_root.get_full_file_path("bootstrap/values.yaml"),
-            call.yaml_file_load("/tmp/root-config-repo/bootstrap/values.yaml"),
-            call.GitRepo_team.get_clone_url(),
-            call.logging.info("Analyzing %s in root repository", "apps/team-non-prod.yaml"),
-            call.GitRepo_root.get_full_file_path("apps/team-non-prod.yaml"),
-            call.yaml_file_load("/tmp/root-config-repo/apps/team-non-prod.yaml"),
-            call.logging.info("Found apps repository in %s", "apps/team-non-prod.yaml"),
-            call.logging.info("Analyzing %s in root repository", "apps/other-team-non-prod.yaml"),
-            call.GitRepo_root.get_full_file_path("apps/other-team-non-prod.yaml"),
-            call.yaml_file_load("/tmp/root-config-repo/apps/other-team-non-prod.yaml"),
             call.logging.info("Root repository already up-to-date. I'm done here."),
         ]
 

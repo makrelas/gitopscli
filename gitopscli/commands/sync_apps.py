@@ -9,8 +9,8 @@ from .command import Command
 from ruamel.yaml import YAML 
 
 
-YAML_BLACKLIST: List[str] = []
-
+#TODO: Custom config reader
+#TODO: Test custom config read, creation of objects AppTenantConfig and RootRepo
 
 class SyncAppsCommand(Command):
     @dataclass(frozen=True)
@@ -98,7 +98,7 @@ class AppTenantConfig:
     def get_custom_config(self, appname):
         team_config_git_repo = self.config_source_repository
         try:
-            custom_config_file = team_config_git_repo.get_full_file_path("app_value_file.yaml")
+            custom_config_file = team_config_git_repo.get_full_file_path(f"{appname}/app_value_file.yaml")
         except Exception as ex: 
             #handle missing file
             #handle broken file/nod adhering to allowed
@@ -106,11 +106,11 @@ class AppTenantConfig:
         #sanitize
         #TODO: how to keep whole content with comments
         #TODO: handling generic values for all apps
-        #if os.path.exists(custom_config_content):
-        #    custom_config_content = yaml_file_load(custom_config_file)
-        #    return custom_config_content["applications"].get(appname, dict())
-        #else:
-        #return {}
+        if os.path.exists(custom_config_file):
+            custom_config_content = yaml_file_load(custom_config_file)
+            return custom_config_content
+        else:
+            return None
 
     def list_apps(self):
         return traverse_config(self.data, self.config_api_version)
@@ -169,19 +169,15 @@ class RootRepo:
                 raise GitOpsException(f"Cannot find key 'repository' in '{tenant_apps_config_file_name}'")
             #if "config" in tenant_apps_config_content:
             logging.info("adding {}".format(bootstrap_entry["name"]))
-            atc = AppTenantConfig(data=yaml_file_load(tenant_apps_config_file),name=bootstrap_entry["name"],config_type="root",file_path=tenant_apps_config_file,file_name=tenant_apps_config_file_name)
+            atc = AppTenantConfig(data=tenant_apps_config_content,name=bootstrap_entry["name"],config_type="root",file_path=tenant_apps_config_file,file_name=tenant_apps_config_file_name)
             tenant_app_dict.update({bootstrap_entry["name"] : atc })
         return tenant_app_dict
 
     def __get_all_apps_list(self):
-        all_apps_list = []
+        all_apps_list = dict()
         for tenant in self.tenant_list:
-            value = traverse_config(self.tenant_list[tenant].data, self.tenant_list[tenant].config_api_version)
-            #path = self.tenant_list[tenant].config_api_version[1]
-            #lookup = self.tenant_list[tenant].data
-            #for key in path:
-            #    lookup = lookup[key]
-            all_apps_list.extend(list(dict(value).keys()))
+            value = traverse_config(self.tenant_list[tenant].data, self.tenant_list[tenant].config_api_version) 
+            all_apps_list.update({tenant : list((dict(value).keys()))})
         return all_apps_list
 
 def traverse_config(object, configver):
@@ -205,15 +201,21 @@ def __sync_apps(team_config_git_repo: GitRepo, root_config_git_repo: GitRepo, gi
     team_config_app_name = team_config_git_repo.get_clone_url().split("/")[-1].removesuffix(".git")
     rr=RootRepo(root_config_git_repo)
     tenant_config_team_repo=AppTenantConfig("team",config_source_repository=team_config_git_repo)
+
+    
     #dict conversion causes YAML object to be unordered
     tenant_config_repo_apps = dict(tenant_config_team_repo.list_apps())
+    if not team_config_app_name in list(rr.tenant_list.keys()):
+        raise GitOpsException("Couldn't find config file for apps repository in root repository's 'apps/' directory")
     current_repo_apps = dict(rr.tenant_list[team_config_app_name].list_apps())
-    apps_from_other_repos = rr.app_list
-    
-    if len(apps_from_other_repos) != len(set(apps_from_other_repos)):
-        logging.info("duplicate value found, veryfying")
-        #TODO find which value is duplicate
-        #raise GitOpsException(f"Application '{app_key}' already exists in a different repository")
+
+    apps_from_other_repos = rr.app_list.copy()
+    apps_from_other_repos.pop(team_config_app_name)
+    for app in list(tenant_config_repo_apps.keys()):
+        for tenant in apps_from_other_repos.values():
+            if app in tenant:
+                raise GitOpsException(f"Application '{app}' already exists in a different repository")
+
     logging.info("Found %s app(s) in apps repository: %s", len(tenant_config_repo_apps), ", ".join(tenant_config_repo_apps))
     logging.info("Searching apps repository in root repository's 'apps/' directory...")
 
@@ -226,7 +228,7 @@ def __sync_apps(team_config_git_repo: GitRepo, root_config_git_repo: GitRepo, gi
     for app in list(current_repo_apps.keys()):
         if current_repo_apps.get(app, dict()) is not None:
             for key in list(current_repo_apps.get(app, dict())):
-                if key != "CustomAppConfig":
+                if key != "customAppConfig":
                     del current_repo_apps[app][key]
     #TODO: validate if all changes do key values trigger difference
     if current_repo_apps == tenant_config_repo_apps:
